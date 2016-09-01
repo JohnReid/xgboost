@@ -46,6 +46,14 @@
 #' @param folds \code{list} provides a possibility to use a list of pre-defined CV folds
 #'        (each element must be a vector of test fold's indices). When folds are supplied, 
 #'        the \code{nfold} and \code{stratified} parameters are ignored.
+#' @param folds_train \code{list} provides a possibility to use a list of pre-defined CV folds
+#'        (each element must be a vector of train fold's indices). When \code{folds_train} are supplied, 
+#'        the \code{nfold}, \code{stratified} and \code{fold} parameters are ignored. \code{folds_test}
+#'        must also be supplied.
+#' @param folds_test \code{list} provides a possibility to use a list of pre-defined CV folds
+#'        (each element must be a vector of test fold's indices). When \code{folds_test} are supplied, 
+#'        the \code{nfold}, \code{stratified} and \code{fold} parameters are ignored. \code{folds_train}
+#'        must also be supplied.
 #' @param verbose \code{boolean}, print the statistics during the process
 #' @param print_every_n Print each n-th iteration evaluation messages when \code{verbose>0}.
 #'        Default is 1 which means all messages are printed. This parameter is passed to the 
@@ -88,7 +96,11 @@
 #'         CV-based evaluation means and standard deviations for the training and test CV-sets.
 #'         It is created by the \code{\link{cb.evaluation.log}} callback.
 #'   \item \code{niter} number of boosting iterations.
-#'   \item \code{folds} the list of CV folds' indices - either those passed through the \code{folds} 
+#'   \item \code{folds} the list of CV folds' indices - either those passed through the \code{folds}
+#'         parameter or randomly generated.
+#'   \item \code{folds_train} the list of CV folds' train indices - either those passed through the \code{folds_train}
+#'         parameter or randomly generated.
+#'   \item \code{folds_test} the list of CV folds' test indices - either those passed through the \code{folds_test}
 #'         parameter or randomly generated.
 #'   \item \code{best_iteration} iteration number with the best evaluation metric value
 #'         (only available with early stopping).
@@ -97,7 +109,7 @@
 #'         (only available with early stopping).
 #'   \item \code{pred} CV prediction values available when \code{prediction} is set. 
 #'         It is either vector or matrix (see \code{\link{cb.cv.predict}}).
-#'   \item \code{models} a liost of the CV folds' models. It is only available with the explicit 
+#'   \item \code{models} a list of the CV folds' models. It is only available with the explicit 
 #'         setting of the \code{cb.cv.predict(save_models = TRUE)} callback.
 #' }
 #'
@@ -111,10 +123,10 @@
 #' 
 #' @export
 xgb.cv <- function(params=list(), data, nrounds, nfold, label = NULL, missing = NA,
-                   prediction = FALSE, showsd = TRUE, metrics=list(),
-                   obj = NULL, feval = NULL, stratified = TRUE, folds = NULL, 
-                   verbose = TRUE, print_every_n=1L,
-                   early_stopping_rounds = NULL, maximize = NULL, callbacks = list(), ...) {
+                         prediction = FALSE, showsd = TRUE, metrics=list(),
+                         obj = NULL, feval = NULL, stratified = TRUE, folds = NULL, folds_train = NULL, folds_test = NULL,
+                         verbose = TRUE, print_every_n=1L,
+                         early_stopping_rounds = NULL, maximize = NULL, callbacks = list(), ...) {
 
   check.deprecation(...)
   
@@ -136,14 +148,29 @@ xgb.cv <- function(params=list(), data, nrounds, nfold, label = NULL, missing = 
     stop("Labels must be provided for CV either through xgb.DMatrix, or through 'label=' when 'data' is matrix")
   
   # CV folds
-  if(!is.null(folds)) {
-    if(class(folds) != "list" || length(folds) < 2)
-      stop("'folds' must be a list with 2 or more elements that are vectors of indices for each CV-fold")
-    nfold <- length(folds)
+  if(!is.null(folds_train) || !is.null(folds_test)) {
+    if (is.null(folds_train))
+      stop("'folds_train' cannot be NULL if folds_test is specified")
+    if (is.null(folds_test))
+      stop("'folds_test' cannot be NULL if folds_train is specified")
+    if(class(folds_train) != "list" || length(folds_train) < 2)
+      stop("'folds_train' must be a list with 2 or more elements that are vectors of indices for each CV-fold")
+    if(class(folds_test) != "list" || length(folds_test) < 2)
+      stop("'folds_test' must be a list with 2 or more elements that are vectors of indices for each CV-fold")
+    if(length(folds_train) != length(folds_test))
+      stop("'folds_test' must be the same length as 'folds_train'")
   } else {
-    if (nfold <= 1)
-      stop("'nfold' must be > 1")
-    folds <- generate.cv.folds(nfold, nrow(data), stratified, label, params)
+    if(!is.null(folds)) {
+      if(class(folds) != "list" || length(folds) < 2)
+        stop("'folds' must be a list with 2 or more elements that are vectors of indices for each CV-fold")
+      nfold <- length(folds)
+    } else {
+      if (nfold <= 1)
+        stop("'nfold' must be > 1")
+      folds <- generate.cv.folds(nfold, nrow(data), stratified, label, params)
+    }
+    folds_train <- lapply(seq_along(folds), function(k) unlist(folds[-k]))
+    folds_test <- lapply(seq_along(folds), function(k) unlist(folds[[k]]))
   }
   
   # Potential TODO: sequential CV
@@ -176,12 +203,11 @@ xgb.cv <- function(params=list(), data, nrounds, nfold, label = NULL, missing = 
   # Sort the callbacks into categories
   cb <- categorize.callbacks(callbacks)
 
-  
   # create the booster-folds
   dall <- xgb.get.DMatrix(data, label, missing)
-  bst_folds <- lapply(1:length(folds), function(k) {
-    dtest  <- slice(dall, folds[[k]])
-    dtrain <- slice(dall, unlist(folds[-k]))
+  bst_folds <- lapply(seq_along(folds_train), function(k) {
+    dtest  <- slice(dall, folds_test[[k]])
+    dtrain <- slice(dall, folds_train[[k]])
     bst <- xgb.Booster(params, list(dtrain, dtest))
     list(dtrain=dtrain, bst=bst, watchlist=list(train=dtrain, test=dtest), index=folds[[k]])
   })
@@ -222,6 +248,8 @@ xgb.cv <- function(params=list(), data, nrounds, nfold, label = NULL, missing = 
     callbacks = callbacks,
     evaluation_log = evaluation_log,
     niter = end_iteration,
+    folds_train = folds_train,
+    folds_test = folds_test,
     folds = folds
   )
   ret <- c(ret, basket)
