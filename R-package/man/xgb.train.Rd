@@ -39,6 +39,7 @@ xgboost(data = NULL, label = NULL, missing = NA, weight = NULL,
   \item \code{subsample} subsample ratio of the training instance. Setting it to 0.5 means that xgboost randomly collected half of the data instances to grow trees and this will prevent overfitting. It makes computation shorter (because less data to analyse). It is advised to use this parameter with \code{eta} and increase \code{nround}. Default: 1 
   \item \code{colsample_bytree} subsample ratio of columns when constructing each tree. Default: 1
   \item \code{num_parallel_tree} Experimental parameter. number of trees to grow per round. Useful to test Random Forest through Xgboost (set \code{colsample_bytree < 1}, \code{subsample  < 1}  and \code{round = 1}) accordingly. Default: 1
+  \item \code{monotone_constraints} A numerical vector consists of \code{1}, \code{0} and \code{-1} with its length equals to the number of features in the training data. \code{1} is increasing, \code{-1} is decreasing and \code{0} is no constraint.
 }
 
 2.2. Parameter for Linear Booster
@@ -109,7 +110,7 @@ This parameter is passed to the \code{\link{cb.early.stop}} callback.}
 
 \item{save_name}{the name or path for periodically saved model file.}
 
-\item{xgb_model}{a previously built model to continue the trainig from.
+\item{xgb_model}{a previously built model to continue the training from.
 Could be either an object of class \code{xgb.Booster}, or its raw data, or the name of a 
 file with a previously saved model.}
 
